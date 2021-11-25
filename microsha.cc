@@ -436,21 +436,19 @@ a:
 			signal(SIGINT, sigfunc2);
 			
 			dode(args, redir);
-			
-			if(time){
-				struct rusage rus;
-				if ( getrusage(RUSAGE_CHILDREN, &rus) != -1 ){
-					printf("all: %lf \nsys : %lf\nuser: %lf\n", -((double)(clock() - clockk))/ CLOCKS_PER_SEC,
-					(double)rus.ru_stime.tv_sec + (double)rus.ru_stime.tv_usec/1000000.0,
-					(double)rus.ru_utime.tv_sec+  (double)rus.ru_utime.tv_usec / 1000000.0);
-				}
-			}
+		}
 		return 0;
 		} else {
 			signal(SIGINT, sigfunc);
 			int status;
 			pid = wait(&status);
-			
+			if(time){
+			struct rusage rus;
+			if ( getrusage(RUSAGE_CHILDREN, &rus) != -1 ){
+				printf("all: %lf \nsys : %lf\nuser: %lf\n", -((double)(clock() - clockk))/ CLOCKS_PER_SEC,
+				(double)rus.ru_stime.tv_sec + (double)rus.ru_stime.tv_usec/1000000.0,
+				(double)rus.ru_utime.tv_sec+  (double)rus.ru_utime.tv_usec / 1000000.0);
+			}	
 			if (status != 0 and status != 2) {
 				//printf("--%d\n", status);
 				//perror("ошибка вызова");
