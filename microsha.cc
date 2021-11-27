@@ -12,8 +12,9 @@
 #include <vector>
 #include <signal.h>
 #include <sys/resource.h>
-#include <time.h>
+#include <sys/time.h>
 #include <signal.h>
+ #include <pwd.h>
 
 using namespace std;
 
@@ -176,7 +177,6 @@ short num(string& s)
         return 4;
     return 0;
 }
-
 bool my_strstr(string& s)
 {
     for (size_t i = 0; s[i] != '\0'; ++i) {
@@ -366,11 +366,13 @@ int dode(vector<vector<char*>>& args, const vector<triple>& redir)
 //доделать
 bool init(void)
 {
+    uid_t id = getuid();
+    struct passwd * userinfo = getpwuid(id);
     char c = '>';
-    if (strcmp(getenv("USER"), "root"))
+    if (userinfo->pw_uid == 0)
         c = '!';
     
-    printf("%s %c", current_path, c);
+    printf("%s:%s %c", userinfo->pw_name, current_path, c);
     return 0;
 }
 
@@ -400,7 +402,9 @@ int main(int argc, char** argv){
 	vector<triple> redir;
 	bool time;
 	pair<int, bool> parc;
-	clock_t clockk;
+	struct timeval first_t, second_t;
+    struct timezone tz;
+
 a:	
 	init();
 	vargs.clear();
@@ -417,7 +421,7 @@ a:
     }
     if (parc.first == 0) goto a;
 	time = parc.second;
-	if(time) clockk = clock();
+	if(time)  gettimeofday(&first_t, &tz);
 	if (strcmp(args[0][0], "cd") == 0) {
 		if(conveer.size()){
 			printf("cd не используется в конвеере\n");
@@ -436,22 +440,27 @@ a:
 			signal(SIGINT, sigfunc2);
 			
 			dode(args, redir);
-		}
+			
+
 		return 0;
 		} else {
 			signal(SIGINT, sigfunc);
 			int status;
 			pid = wait(&status);
-			if(time){
-			struct rusage rus;
-			if ( getrusage(RUSAGE_CHILDREN, &rus) != -1 ){
-				printf("all: %lf \nsys : %lf\nuser: %lf\n", -((double)(clock() - clockk))/ CLOCKS_PER_SEC,
-				(double)rus.ru_stime.tv_sec + (double)rus.ru_stime.tv_usec/1000000.0,
-				(double)rus.ru_utime.tv_sec+  (double)rus.ru_utime.tv_usec / 1000000.0);
-			}	
+			
 			if (status != 0 and status != 2) {
 				//printf("--%d\n", status);
 				//perror("ошибка вызова");
+			}
+            if(time){
+				struct rusage rus;
+                gettimeofday(&second_t, &tz);
+				if ( getrusage(RUSAGE_CHILDREN, &rus) != -1 ){
+					printf("all: %lf \nsys : %lf\nuser: %lf\n",
+                     ((double)second_t.tv_sec + (double)second_t.tv_usec/1000000.0 - (double)first_t.tv_sec - (double)first_t.tv_usec/1000000.0) ,
+					(double)rus.ru_stime.tv_sec + (double)rus.ru_stime.tv_usec/1000000.0,
+					(double)rus.ru_utime.tv_sec+  (double)rus.ru_utime.tv_usec / 1000000.0);
+				}
 			}
 		}	
 	}
