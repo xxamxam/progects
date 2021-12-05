@@ -67,7 +67,6 @@ void walk_rec(std::string dirname,bool rec){
         std::string ss = dirname + "/" + de->d_name;
         if( de-> d_type == DT_REG){
             stack_.lock();
-            printf("%s\n", ss.c_str());
             dirnames.push(ss);
             stack_.unlock();
         }
