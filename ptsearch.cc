@@ -1,3 +1,7 @@
+// condition variables события для лифта
+// в ptsearch сделать чтобы потоки создались только один раз
+
+
 
 #include <pthread.h>
 #include <stdio.h>
@@ -13,6 +17,8 @@
 #include <fcntl.h>
 #include <mutex>
 #include <sys/mman.h>
+
+#include <stack>
 
 #ifndef BZ
 #pragma GCC optimize ("Ofast")
@@ -30,7 +36,11 @@
 using namespace std;
 
 mutex write_mutex;
-mutex change_mutex;
+mutex stack_;
+bool works;
+stack<string> dirnames;
+vector<int> pref;
+string search_str;
 
 std::vector<int> prefix_function(std::string s) {
 	int n = s.length();
@@ -45,58 +55,69 @@ std::vector<int> prefix_function(std::string s) {
 	return pi;
 }
 
-typedef struct kmp{
-public:
-	std::vector<int>* pref = nullptr;
-	std::string* search = nullptr;
-	std::string* path = nullptr;
-	bool uses = 0;
-	} kmp;
+void walk_rec(std::string dirname,bool rec){
 	
-	
-int thread_count = 0;
+	DIR* dir = opendir(dirname.c_str());
+	if(dir == nullptr){
+		return;
+		}
+	for(dirent* de = readdir(dir); de != NULL; de = readdir(dir)) {
+		if (strcmp(de->d_name, ".") == 0 or strcmp(de->d_name, "..") == 0)
+            continue;
+        std::string ss = dirname + "/" + de->d_name;
+        if( de-> d_type == DT_REG){
+            stack_.lock();
+            printf("%s\n", ss.c_str());
+            dirnames.push(ss);
+            stack_.unlock();
+        }
+        if (de->d_type == DT_DIR and rec == true) {
+            walk_rec(ss, rec);
+        }
+	}
+	closedir(dir);
+}
 
-void *foo(void * a){
-	
-	kmp * kmpp = (kmp*)a;
-	std::vector<int>* pref = kmpp->pref;
-	std::string* s = kmpp->search;
-	string path = *(kmpp->path);
-	
-	int n = s->length();
-	
-	int pos = 0;
+struct vyz{
+	string * dirname;
+	bool recur; 
+};
+
+void* filler(void* a){
+    vyz* tmp = (vyz*)a;
+    works = true;
+    walk_rec(*tmp->dirname, tmp->recur);
+    works = false;
+    return NULL;
+}   
+
+void proccess(string & path){
+    string s = search_str;
+    int n = s.size();
+
+    int pos = 0;
 	size_t begin = 0;
 	int line = 1;
 	char * buf;
 	int file;
-	size_t siz;
-	
-	FILE * file_s = fopen(path.c_str(), "r");
-	if(!file_s){
+
+    file = open(path.c_str(), O_RDONLY);
+    if(file < 0){
 		write_mutex.lock();
 		printf("can not open %s \n", path.c_str());
 		write_mutex.unlock();
-		goto foo_b;
+        return;
 	}
-	fseek(file_s,0, SEEK_END);
-	siz = ftell(file_s);
-	fseek(file_s, 0, SEEK_SET);
-	fclose(file_s);
-	
-	file = open(path.c_str(), O_RDONLY);
-	if(file < 0){
-		write_mutex.lock();
-		printf("can not open %s \n", path.c_str());
-		write_mutex.unlock();
-		goto foo_b;
-	}
-	
-	buf = (char*)mmap(NULL, siz, PROT_READ, MAP_PRIVATE, file, 0);
+
+    struct stat bufff;
+    fstat(file, &bufff);
+    size_t siz = bufff.st_size;
+    buf = (char*)mmap(NULL, siz, PROT_READ, MAP_PRIVATE, file, 0);
+
 	for(size_t i = 0; i < siz; ++i){
 		if( buf[i] == '\n') line ++, begin = i + 1, pos = 0;
-		while(pos > 0 && (*s)[pos] != buf[i]) pos = (*pref)[pos-1];
-		if ((*s)[pos] == buf[i]){
+		while(pos > 0 && (s)[pos] != buf[i]) pos = (pref)[pos-1];
+		if ((s)[pos] == buf[i]){
 			++pos;	
 			}
 		if(pos == n){
@@ -110,113 +131,45 @@ void *foo(void * a){
 		}
 	
 	}
-	
-	munmap(buf, siz);
+
+    munmap(buf, siz);
 	close(file);
-foo_b:
-	change_mutex.lock();
-	kmpp->uses = false;
-	thread_count--;
-	change_mutex.unlock();
-	
-	return NULL;
-	}
-	
-	
-vector<kmp>   argss;
-vector<string> strs;
-vector<pthread_t> threads;
-vector<bool> firstly;
-void check(std::string path, kmp kmpp,const int max_pth){
-	
-//	printf("------%d %d \n", argss.size(), strs.size());
-	static bool first = true;
-	if(first){
-		thread_count = 0;
-		argss.resize(max_pth, {nullptr,nullptr,nullptr,false});
-		strs.resize(max_pth);
-		threads.resize(max_pth);
-		firstly.resize(max_pth);
-		for(int i = 0; i < max_pth; ++i) firstly[i] = true;
-		first = false;
-	}
-	while(thread_count == max_pth){
-		usleep(100);
-		}
-		
-	int krug = 0;
-	while(argss[krug].uses){
-		++krug;
-		
-	}
-	strs[krug] = path;
-	argss[krug] = kmpp;
-	argss[krug].path = &strs[krug];
-	change_mutex.lock();
-	pthread_t a;
-	int code = pthread_create(&a, NULL, foo, (void *) &argss[krug]);
-	if(code != 0){
-		perror("не создался поток:");
-		change_mutex.unlock();
-		return;
-		}
-	if(!firstly[krug]) pthread_join(threads[krug], NULL);
-	threads[krug] = a;
-	firstly[krug] = false;
-	argss[krug].uses = true;
-	thread_count++;
-	change_mutex.unlock();
-	
-	return;
-	}
+    return;
+}
 
-void walk_rec(std::string dirname,bool rec, const kmp& kmpp, const int max_pth){
-	
-	DIR* dir = opendir(dirname.c_str());
-	if(dir == nullptr){
-		return;
-		}
-	for(dirent* de = readdir(dir); de != NULL; de = readdir(dir)) {
-		if (strcmp(de->d_name, ".") == 0 or strcmp(de->d_name, "..") == 0)
-            continue;
-        std::string ss = dirname + "/" + de->d_name;
-        if( de-> d_type == DT_REG) check(ss, kmpp, max_pth);
-      //  printf("%s %d\n", ss.c_str(), de-> d_type == DT_REG);
-        if (de->d_type == DT_DIR and rec == true) {
-			//printf("dd\n");
-            walk_rec(ss, rec, kmpp, max_pth);
+void* searcher(void* a){
+    string s;
+    bool get = false;
+    while(works){
+        stack_.lock();
+        if(!dirnames.empty()){
+            get = true;
+            s = dirnames.top();
+            dirnames.pop();
         }
-        
-		//можно отсюда начинать поиск
-		}
-	closedir(dir);
-	}
-	
-	
-struct vyz{
-	string * dirname;
-	bool recur;
-	kmp k;
-	int max_pth; 
-	};
-	
-void procces__(vyz& a){
-	//printf("%p %p %p %p %p\n", a.dirname, &a.dirname, &a.recur, &a.k, &a.max_pth);
-	walk_rec(*(a.dirname),a.recur, a.k, a.max_pth);
-	for(size_t i = 0 ; i < firstly.size(); ++i){
-		if(!(firstly[i])){
-			pthread_join(threads[i], NULL);
-		}
-	}
-	return ;
-	}
+        stack_.unlock();
+        if(get) proccess(s);
+        get = false;
+    }
+    while(true){
+        stack_.lock();
+        if(!dirnames.empty()){
+            get = true;
+            s = dirnames.top();
+            dirnames.pop();
+        }else{
+            stack_.unlock();
+            break;
+        }
+        stack_.unlock();
+        proccess(s);
+    }
 
-
+    return NULL;
+}
 
 int main(int argc, char** argv){
 	std::string path = ".";
-	std::string search_str;
-	vector<int> pref;
 	int nums = 1;
 	bool recur = true;
 	bool search_str_get = false;
@@ -235,14 +188,24 @@ int main(int argc, char** argv){
 			}		
 	}
 	pref = prefix_function(search_str);
-	
-	kmp a = {&pref, &search_str, nullptr, false};
-	vyz tt = {&path,recur, a, nums};
-	procces__(tt);
-	
-	argss.clear();
-	strs.clear();
-	
-	return 0;
-	}
 
+    
+    vyz tt = {&path, recur};
+    pthread_t a;
+    if(pthread_create(&a, NULL, filler, (void*) &tt) != 0){
+        printf("не создался поток\n");
+        return -1;
+    }
+    
+    vector<pthread_t> searchers(nums);
+    for(int i = 0; i < nums; ++i){
+        if( pthread_create(&searchers[i], NULL, searcher, NULL) != 0){
+            printf("не создался %d поток поиска\n", i);
+        }
+    }
+
+    pthread_join(a, NULL);
+    for(int i = 0; i < nums; ++i) pthread_join(searchers[i], NULL);
+    
+	return 0;
+}
