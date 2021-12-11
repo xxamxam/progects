@@ -70,12 +70,13 @@ void walk_rec(std::string dirname,bool rec){
         if( de-> d_type == DT_REG){
             stack_.lock();
             dirnames.push(ss);
+	    stack_.unlock();
             struct msgbuf mbuf = {1 , 'a'};
             if(msgsnd(msg_snd, &mbuf, 1, IPC_NOWAIT) == -1){
 				perror("manager_send");
 				exit(1);
 			}
-            stack_.unlock();
+            
         }
         if (de->d_type == DT_DIR and rec == true) {
             walk_rec(ss, rec);
