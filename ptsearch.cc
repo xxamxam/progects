@@ -1,7 +1,4 @@
-// condition variables события для лифта
-// в ptsearch сделать чтобы потоки создались только один раз
-
-
+// pthread_rwlock_t
 
 #include <pthread.h>
 #include <stdio.h>
@@ -20,6 +17,10 @@
 
 #include <stack>
 
+#include <sys/types.h>
+#include <sys/ipc.h>
+#include <sys/msg.h>
+
 #ifndef BZ
 #pragma GCC optimize ("Ofast")
 #pragma GCC optimize ("unroll-loops")
@@ -37,7 +38,8 @@ using namespace std;
 
 mutex write_mutex;
 mutex stack_;
-bool works;
+int msg_snd;
+
 stack<string> dirnames;
 vector<int> pref;
 string search_str;
@@ -68,6 +70,11 @@ void walk_rec(std::string dirname,bool rec){
         if( de-> d_type == DT_REG){
             stack_.lock();
             dirnames.push(ss);
+            struct msgbuf mbuf = {1 , 'a'};
+            if(msgsnd(msg_snd, &mbuf, 1, IPC_NOWAIT) == -1){
+				perror("manager_send");
+				exit(1);
+			}
             stack_.unlock();
         }
         if (de->d_type == DT_DIR and rec == true) {
@@ -79,14 +86,21 @@ void walk_rec(std::string dirname,bool rec){
 
 struct vyz{
 	string * dirname;
-	bool recur; 
+    pthread_rwlock_t* pw;
+	bool recur;
+    int N;
 };
 
 void* filler(void* a){
     vyz* tmp = (vyz*)a;
-    works = true;
     walk_rec(*tmp->dirname, tmp->recur);
-    works = false;
+    struct msgbuf mbuf = {1 , 'b'};
+    for(int i = 0; i < tmp->N; ++i){
+        if(msgsnd(msg_snd, &mbuf, 1, IPC_NOWAIT) == -1){
+				perror("manager_send");
+				exit(1);
+			}
+    }    
     return NULL;
 }   
 
@@ -136,34 +150,24 @@ void proccess(string & path){
     return;
 }
 
+
 void* searcher(void* a){
+    pthread_rwlock_t* lock = (pthread_rwlock_t*)a;
     string s;
-    bool get = false;
-    while(works){
-        stack_.lock();
-        if(!dirnames.empty()){
-            get = true;
-            s = dirnames.top();
-            dirnames.pop();
-        }
-        stack_.unlock();
-        if(get) proccess(s);
-        get = false;
-    }
+   
+    struct msgbuf mbuf_m;
     while(true){
+        if(msgrcv(msg_snd, &mbuf_m,1,1, 0) == -1){
+				perror("manager_reseive");
+				exit(1);
+			}
+        if(*mbuf_m.mtext == 'b') break;
         stack_.lock();
-        if(!dirnames.empty()){
-            get = true;
-            s = dirnames.top();
-            dirnames.pop();
-        }else{
-            stack_.unlock();
-            break;
-        }
+        s = dirnames.top();
+        dirnames.pop();
         stack_.unlock();
         proccess(s);
     }
-
     return NULL;
 }
 
@@ -186,10 +190,20 @@ int main(int argc, char** argv){
 			else {printf("слишком много аргументов\n"); return 0;}
 			}		
 	}
+
+    key_t first = ftok(".", 'm');
+    if(first == -1){
+    	perror("key:");
+		exit(-1);
+    }
+    if((msg_snd = msgget(first, IPC_CREAT | 0666)) == -1) perror("msg_snd");
+
 	pref = prefix_function(search_str);
 
     
-    vyz tt = {&path, recur};
+    pthread_rwlock_t lockk;
+
+    vyz tt = {&path, &lockk, recur, nums};
     pthread_t a;
     if(pthread_create(&a, NULL, filler, (void*) &tt) != 0){
         printf("не создался поток\n");
@@ -198,13 +212,13 @@ int main(int argc, char** argv){
     
     vector<pthread_t> searchers(nums);
     for(int i = 0; i < nums; ++i){
-        if( pthread_create(&searchers[i], NULL, searcher, NULL) != 0){
+        if( pthread_create(&searchers[i], NULL, searcher, (void*)&lockk) != 0){
             printf("не создался %d поток поиска\n", i);
         }
     }
 
     pthread_join(a, NULL);
     for(int i = 0; i < nums; ++i) pthread_join(searchers[i], NULL);
-    
+    msgctl(msg_snd, IPC_RMID, 0);
 	return 0;
 }
